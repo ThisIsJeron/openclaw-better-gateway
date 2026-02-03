@@ -1,6 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach, Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach, Mock } from "vitest";
 import { IncomingMessage, ServerResponse } from "node:http";
-import { readFileSync } from "node:fs";
 
 // Mock fs
 vi.mock("node:fs", () => ({
@@ -172,9 +171,9 @@ describe("Better Gateway Plugin", () => {
       expect(result).toBe(false);
     });
 
-    describe("landing page", () => {
-      it("should serve landing page at /better-gateway", async () => {
-        const req = createMockReq("/better-gateway");
+    describe("help page", () => {
+      it("should serve help page at /better-gateway/help", async () => {
+        const req = createMockReq("/better-gateway/help");
         const result = await handler(req, mockRes as ServerResponse);
         expect(result).toBe(true);
         expect(mockRes.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
@@ -182,17 +181,8 @@ describe("Better Gateway Plugin", () => {
         }));
       });
 
-      it("should serve landing page at /better-gateway/", async () => {
-        const req = createMockReq("/better-gateway/");
-        const result = await handler(req, mockRes as ServerResponse);
-        expect(result).toBe(true);
-        expect(mockRes.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
-          "Content-Type": "text/html",
-        }));
-      });
-
-      it("should include features in landing page", async () => {
-        const req = createMockReq("/better-gateway");
+      it("should include features in help page", async () => {
+        const req = createMockReq("/better-gateway/help");
         await handler(req, mockRes as ServerResponse);
         const html = mockRes.end.mock.calls[0][0];
         expect(html).toContain("Better Gateway");
@@ -201,7 +191,7 @@ describe("Better Gateway Plugin", () => {
       });
 
       it("should include bookmarklet link", async () => {
-        const req = createMockReq("/better-gateway");
+        const req = createMockReq("/better-gateway/help");
         await handler(req, mockRes as ServerResponse);
         const html = mockRes.end.mock.calls[0][0];
         expect(html).toContain("javascript:");
@@ -209,11 +199,31 @@ describe("Better Gateway Plugin", () => {
       });
 
       it("should include userscript instructions", async () => {
-        const req = createMockReq("/better-gateway");
+        const req = createMockReq("/better-gateway/help");
         await handler(req, mockRes as ServerResponse);
         const html = mockRes.end.mock.calls[0][0];
         expect(html).toContain("Tampermonkey");
         expect(html).toContain("==UserScript==");
+      });
+    })
+
+    describe("enhanced gateway UI", () => {
+      it("should return true for /better-gateway paths (proxied)", async () => {
+        // For proxy tests we need to mock the http.request module
+        // These tests verify the handler returns true for proxy paths
+        // Full proxy behavior is tested in integration tests
+        const req = createMockReq("/better-gateway");
+
+        // Since http.request is not mocked, handler will make a real request
+        // which will fail, but the handler should still return true
+        const result = await handler(req, mockRes as ServerResponse);
+        expect(result).toBe(true);
+      });
+
+      it("should return true for /better-gateway/ paths (proxied)", async () => {
+        const req = createMockReq("/better-gateway/");
+        const result = await handler(req, mockRes as ServerResponse);
+        expect(result).toBe(true);
       });
     });
 

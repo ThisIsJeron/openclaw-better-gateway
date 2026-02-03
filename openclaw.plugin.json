@@ -7,16 +7,6 @@
   "configSchema": {
     "type": "object",
     "properties": {
-      "upstreamHost": {
-        "type": "string",
-        "default": "localhost",
-        "description": "Hostname of the upstream gateway UI"
-      },
-      "upstreamPort": {
-        "type": "number",
-        "default": 18789,
-        "description": "Port of the upstream gateway UI"
-      },
       "reconnectIntervalMs": {
         "type": "number",
         "default": 3000,

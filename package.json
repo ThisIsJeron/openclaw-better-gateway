@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/inject.js dist/inject.js",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "test": "vitest run",

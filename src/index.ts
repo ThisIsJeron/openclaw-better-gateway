@@ -1,4 +1,4 @@
-import { IncomingMessage, ServerResponse } from "node:http";
+import { IncomingMessage, ServerResponse, request as httpRequest } from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -38,6 +38,13 @@ function loadInjectScript(): string {
     injectScript = readFileSync(scriptPath, "utf-8");
   }
   return injectScript;
+}
+
+function generateConfigScript(config: PluginConfig): string {
+  return `window.__BETTER_GATEWAY_CONFIG__ = ${JSON.stringify({
+    reconnectIntervalMs: config.reconnectIntervalMs,
+    maxReconnectAttempts: config.maxReconnectAttempts,
+  })};`;
 }
 
 function generateLandingPage(config: PluginConfig, gatewayHost: string): string {
@@ -196,16 +203,14 @@ export default {
           return false;
         }
 
-        const gatewayHost = `http://${req.headers.host || "localhost:18789"}`;
+        const hostHeader = req.headers.host || "localhost:18789";
+        const gatewayHost = `http://${hostHeader}`;
 
         // Serve the inject script
         if (pathname === "/better-gateway/inject.js") {
           const script = loadInjectScript();
-          const configuredScript = `window.__BETTER_GATEWAY_CONFIG__ = ${JSON.stringify({
-            reconnectIntervalMs: config.reconnectIntervalMs,
-            maxReconnectAttempts: config.maxReconnectAttempts,
-          })};\n${script}`;
-          
+          const configuredScript = `${generateConfigScript(config)}\n${script}`;
+
           res.writeHead(200, {
             "Content-Type": "application/javascript",
             "Content-Length": Buffer.byteLength(configuredScript),
@@ -229,15 +234,79 @@ export default {
           return true;
         }
 
-        // Landing page
-        if (pathname === "/better-gateway" || pathname === "/better-gateway/") {
+        // Serve landing/help page at /better-gateway/help
+        if (pathname === "/better-gateway/help") {
           const html = generateLandingPage(config, gatewayHost);
           res.writeHead(200, {
             "Content-Type": "text/html",
             "Content-Length": Buffer.byteLength(html),
           });
           res.end(html);
-          api.logger.debug("Served landing page");
+          api.logger.debug("Served help page");
+          return true;
+        }
+
+        // Enhanced gateway UI - proxy the real gateway and inject our script
+        if (pathname === "/better-gateway" || pathname === "/better-gateway/") {
+          // Always proxy to localhost:18789 (internal gateway) - not the external host
+          const internalPort = 18789;
+
+          const proxyReq = httpRequest(
+            {
+              hostname: "127.0.0.1",
+              port: internalPort,
+              path: "/",
+              method: "GET",
+              family: 4, // Force IPv4
+              headers: {
+                "Accept": "text/html",
+                "Host": "127.0.0.1:18789",
+              },
+            },
+            (proxyRes) => {
+              const contentType = proxyRes.headers["content-type"] || "";
+              const chunks: Buffer[] = [];
+
+              proxyRes.on("data", (chunk: Buffer) => chunks.push(chunk));
+              proxyRes.on("end", () => {
+                let body = Buffer.concat(chunks).toString("utf-8");
+
+                // If it's HTML, inject our script before </head>
+                if (contentType.includes("text/html")) {
+                  const injectTag = `<script>${generateConfigScript(config)}\n${loadInjectScript()}</script>`;
+
+                  if (body.includes("</head>")) {
+                    body = body.replace("</head>", `${injectTag}</head>`);
+                  } else if (body.includes("</body>")) {
+                    body = body.replace("</body>", `${injectTag}</body>`);
+                  } else {
+                    body = body + injectTag;
+                  }
+
+                  // Rewrite relative URLs to work from /better-gateway/
+                  // Assets like /assets/foo.js need to stay as /assets/foo.js
+                  // But hrefs to "/" should go to the original gateway
+                }
+
+                const headers: Record<string, string | number> = {
+                  "Content-Type": contentType,
+                  "Content-Length": Buffer.byteLength(body),
+                };
+
+                res.writeHead(proxyRes.statusCode || 200, headers);
+                res.end(body);
+                api.logger.debug("Served enhanced gateway UI");
+              });
+            }
+          );
+
+          proxyReq.on("error", (err) => {
+            api.logger.error(`Proxy error: ${err.message}`);
+            res.writeHead(502, { "Content-Type": "text/plain" });
+            res.end("Failed to fetch gateway UI");
+          });
+
+          proxyReq.end();
           return true;
         }
 

@@ -1,269 +1,294 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { EventEmitter } from "node:events";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import { describe, it, expect, vi, beforeEach, afterEach, Mock } from "vitest";
+import { IncomingMessage, ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
 
+// Mock fs
 vi.mock("node:fs", () => ({
-  readFileSync: vi.fn(() => "console.log('injected script');"),
+  readFileSync: vi.fn(() => "// mock inject script"),
 }));
 
-const createMockRequest = (options: {
-  url: string;
-  method?: string;
-  headers?: Record<string, string>;
-}): IncomingMessage => {
-  const req = new EventEmitter() as IncomingMessage;
-  req.url = options.url;
-  req.method = options.method || "GET";
-  req.headers = options.headers || { host: "localhost:3000" };
-  (req as any).pipe = vi.fn((dest) => dest);
-  return req;
-};
+// Import after mocking
+import plugin from "./index.js";
 
-const createMockResponse = (): ServerResponse & {
-  _statusCode: number;
-  _headers: Record<string, string>;
-  _body: string;
-} => {
-  const res = new EventEmitter() as any;
-  res._statusCode = 200;
-  res._headers = {};
-  res._body = "";
-  res.writeHead = vi.fn((code: number, headers?: Record<string, string>) => {
-    res._statusCode = code;
-    if (headers) res._headers = { ...res._headers, ...headers };
-  });
-  res.end = vi.fn((body?: string) => {
-    if (body) res._body = body;
-  });
-  res.write = vi.fn((chunk: string) => {
-    res._body += chunk;
-  });
-  return res;
-};
+describe("Better Gateway Plugin", () => {
+  describe("plugin metadata", () => {
+    it("should have correct id", () => {
+      expect(plugin.id).toBe("better-gateway");
+    });
 
-describe("Plugin exports", () => {
-  let plugin: any;
+    it("should have correct name", () => {
+      expect(plugin.name).toBe("Better Gateway");
+    });
 
-  beforeEach(async () => {
-    vi.resetModules();
-    plugin = (await import("./index.js")).default;
-  });
-
-  it("should export plugin with correct id and name", () => {
-    expect(plugin.id).toBe("better-gateway");
-    expect(plugin.name).toBe("Better Gateway");
-  });
-
-  it("should have a configSchema with parse method", () => {
-    expect(plugin.configSchema).toBeDefined();
-    expect(typeof plugin.configSchema.parse).toBe("function");
-  });
-
-  it("should have uiHints defined", () => {
-    expect(plugin.configSchema.uiHints).toBeDefined();
-    expect(plugin.configSchema.uiHints.upstreamHost).toBeDefined();
-    expect(plugin.configSchema.uiHints.upstreamPort).toBeDefined();
-  });
-
-  it("should have a register method", () => {
-    expect(typeof plugin.register).toBe("function");
-  });
-});
-
-describe("configSchema.parse", () => {
-  let plugin: any;
-
-  beforeEach(async () => {
-    vi.resetModules();
-    plugin = (await import("./index.js")).default;
-  });
-
-  it("should return default config when given empty object", () => {
-    const config = plugin.configSchema.parse({});
-    expect(config).toEqual({
-      upstreamHost: "localhost",
-      upstreamPort: 18789,
-      reconnectIntervalMs: 3000,
-      maxReconnectAttempts: 10,
+    it("should have configSchema", () => {
+      expect(plugin.configSchema).toBeDefined();
+      expect(typeof plugin.configSchema.parse).toBe("function");
     });
   });
 
-  it("should return default config when given undefined", () => {
-    const config = plugin.configSchema.parse(undefined);
-    expect(config).toEqual({
-      upstreamHost: "localhost",
-      upstreamPort: 18789,
-      reconnectIntervalMs: 3000,
-      maxReconnectAttempts: 10,
+  describe("configSchema.parse", () => {
+    it("should return defaults for empty config", () => {
+      const config = plugin.configSchema.parse({});
+      expect(config).toEqual({
+        reconnectIntervalMs: 3000,
+        maxReconnectAttempts: 10,
+      });
+    });
+
+    it("should parse custom reconnectIntervalMs", () => {
+      const config = plugin.configSchema.parse({ reconnectIntervalMs: 5000 });
+      expect(config.reconnectIntervalMs).toBe(5000);
+    });
+
+    it("should parse custom maxReconnectAttempts", () => {
+      const config = plugin.configSchema.parse({ maxReconnectAttempts: 20 });
+      expect(config.maxReconnectAttempts).toBe(20);
+    });
+
+    it("should handle undefined input", () => {
+      const config = plugin.configSchema.parse(undefined);
+      expect(config.reconnectIntervalMs).toBe(3000);
+      expect(config.maxReconnectAttempts).toBe(10);
+    });
+
+    it("should handle null input", () => {
+      const config = plugin.configSchema.parse(null);
+      expect(config.reconnectIntervalMs).toBe(3000);
+      expect(config.maxReconnectAttempts).toBe(10);
     });
   });
 
-  it("should override defaults with provided values", () => {
-    const config = plugin.configSchema.parse({
-      upstreamHost: "example.com",
-      upstreamPort: 8080,
-      reconnectIntervalMs: 5000,
-      maxReconnectAttempts: 20,
+  describe("register", () => {
+    let mockApi: {
+      registerHttpHandler: Mock;
+      logger: { info: Mock; warn: Mock; error: Mock; debug: Mock };
+      dataDir: string;
+      pluginConfig: Record<string, unknown>;
+    };
+
+    beforeEach(() => {
+      mockApi = {
+        registerHttpHandler: vi.fn(),
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        },
+        dataDir: "/tmp/test",
+        pluginConfig: {},
+      };
     });
-    expect(config).toEqual({
-      upstreamHost: "example.com",
-      upstreamPort: 8080,
-      reconnectIntervalMs: 5000,
-      maxReconnectAttempts: 20,
+
+    it("should register HTTP handler", () => {
+      plugin.register(mockApi);
+      expect(mockApi.registerHttpHandler).toHaveBeenCalledTimes(1);
+      expect(typeof mockApi.registerHttpHandler.mock.calls[0][0]).toBe(
+        "function"
+      );
+    });
+
+    it("should log initialization with default config", () => {
+      plugin.register(mockApi);
+      expect(mockApi.logger.info).toHaveBeenCalledWith(
+        expect.stringContaining("3000ms")
+      );
+      expect(mockApi.logger.info).toHaveBeenCalledWith(
+        expect.stringContaining("10")
+      );
+    });
+
+    it("should log initialization with custom config", () => {
+      mockApi.pluginConfig = {
+        reconnectIntervalMs: 5000,
+        maxReconnectAttempts: 20,
+      };
+      plugin.register(mockApi);
+      expect(mockApi.logger.info).toHaveBeenCalledWith(
+        expect.stringContaining("5000ms")
+      );
+      expect(mockApi.logger.info).toHaveBeenCalledWith(
+        expect.stringContaining("20")
+      );
     });
   });
 
-  it("should allow partial config overrides", () => {
-    const config = plugin.configSchema.parse({
-      upstreamHost: "custom-host",
-    });
-    expect(config.upstreamHost).toBe("custom-host");
-    expect(config.upstreamPort).toBe(18789);
-    expect(config.reconnectIntervalMs).toBe(3000);
-    expect(config.maxReconnectAttempts).toBe(10);
-  });
-});
+  describe("HTTP handler", () => {
+    let handler: (
+      req: IncomingMessage,
+      res: ServerResponse
+    ) => Promise<boolean>;
+    let mockRes: Partial<ServerResponse> & {
+      writeHead: Mock;
+      end: Mock;
+    };
+    let mockLogger: { info: Mock; warn: Mock; error: Mock; debug: Mock };
 
-describe("register", () => {
-  let plugin: any;
-  let registeredHandler: ((req: IncomingMessage, res: ServerResponse) => Promise<boolean>) | null;
-  let mockApi: any;
-
-  beforeEach(async () => {
-    vi.resetModules();
-    plugin = (await import("./index.js")).default;
-    registeredHandler = null;
-
-    mockApi = {
-      registerHttpHandler: vi.fn((handler) => {
-        registeredHandler = handler;
-      }),
-      logger: {
+    beforeEach(() => {
+      mockLogger = {
         info: vi.fn(),
         warn: vi.fn(),
         error: vi.fn(),
         debug: vi.fn(),
-      },
-      dataDir: "/tmp/test-data",
-      pluginConfig: {
-        upstreamHost: "localhost",
-        upstreamPort: 18789,
-        reconnectIntervalMs: 3000,
-        maxReconnectAttempts: 10,
-      },
-    };
-  });
+      };
 
-  it("should register an HTTP handler", () => {
-    plugin.register(mockApi);
-    expect(mockApi.registerHttpHandler).toHaveBeenCalled();
-    expect(registeredHandler).not.toBeNull();
-  });
+      const mockApi = {
+        registerHttpHandler: vi.fn((h) => {
+          handler = h;
+        }),
+        logger: mockLogger,
+        dataDir: "/tmp/test",
+        pluginConfig: {},
+      };
 
-  it("should log initialization message", () => {
-    plugin.register(mockApi);
-    expect(mockApi.logger.info).toHaveBeenCalledWith(
-      "Better Gateway proxying to localhost:18789"
-    );
-  });
+      plugin.register(mockApi);
 
-  it("should return false for non-matching paths", async () => {
-    plugin.register(mockApi);
-    const req = createMockRequest({ url: "/some-other-path" });
-    const res = createMockResponse();
+      mockRes = {
+        writeHead: vi.fn(),
+        end: vi.fn(),
+      };
+    });
 
-    const handled = await registeredHandler!(req, res);
-    expect(handled).toBe(false);
-  });
+    function createMockReq(
+      url: string,
+      host = "localhost:18789"
+    ): IncomingMessage {
+      return {
+        url,
+        headers: { host },
+        method: "GET",
+      } as IncomingMessage;
+    }
 
-  it("should return false for paths without better-gateway prefix", async () => {
-    plugin.register(mockApi);
-    const req = createMockRequest({ url: "/api/data" });
-    const res = createMockResponse();
+    it("should return false for non /better-gateway paths", async () => {
+      const req = createMockReq("/");
+      const result = await handler(req, mockRes as ServerResponse);
+      expect(result).toBe(false);
+    });
 
-    const handled = await registeredHandler!(req, res);
-    expect(handled).toBe(false);
-  });
-});
+    it("should return false for /other paths", async () => {
+      const req = createMockReq("/other");
+      const result = await handler(req, mockRes as ServerResponse);
+      expect(result).toBe(false);
+    });
 
-describe("HTTP handler path matching", () => {
-  let plugin: any;
-  let registeredHandler: ((req: IncomingMessage, res: ServerResponse) => Promise<boolean>) | null;
-  let mockApi: any;
+    describe("landing page", () => {
+      it("should serve landing page at /better-gateway", async () => {
+        const req = createMockReq("/better-gateway");
+        const result = await handler(req, mockRes as ServerResponse);
+        expect(result).toBe(true);
+        expect(mockRes.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
+          "Content-Type": "text/html",
+        }));
+      });
 
-  beforeEach(async () => {
-    vi.resetModules();
-    plugin = (await import("./index.js")).default;
-    registeredHandler = null;
+      it("should serve landing page at /better-gateway/", async () => {
+        const req = createMockReq("/better-gateway/");
+        const result = await handler(req, mockRes as ServerResponse);
+        expect(result).toBe(true);
+        expect(mockRes.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
+          "Content-Type": "text/html",
+        }));
+      });
 
-    mockApi = {
-      registerHttpHandler: vi.fn((handler) => {
-        registeredHandler = handler;
-      }),
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn(),
-      },
-      dataDir: "/tmp/test-data",
-      pluginConfig: {
-        upstreamHost: "localhost",
-        upstreamPort: 18789,
-        reconnectIntervalMs: 3000,
-        maxReconnectAttempts: 10,
-      },
-    };
+      it("should include features in landing page", async () => {
+        const req = createMockReq("/better-gateway");
+        await handler(req, mockRes as ServerResponse);
+        const html = mockRes.end.mock.calls[0][0];
+        expect(html).toContain("Better Gateway");
+        expect(html).toContain("Auto-reconnect");
+        expect(html).toContain("WebSocket");
+      });
 
-    plugin.register(mockApi);
-  });
+      it("should include bookmarklet link", async () => {
+        const req = createMockReq("/better-gateway");
+        await handler(req, mockRes as ServerResponse);
+        const html = mockRes.end.mock.calls[0][0];
+        expect(html).toContain("javascript:");
+        expect(html).toContain("bookmarklet");
+      });
 
-  it("should match /better-gateway path", async () => {
-    const req = createMockRequest({ url: "/better-gateway" });
-    const res = createMockResponse();
+      it("should include userscript instructions", async () => {
+        const req = createMockReq("/better-gateway");
+        await handler(req, mockRes as ServerResponse);
+        const html = mockRes.end.mock.calls[0][0];
+        expect(html).toContain("Tampermonkey");
+        expect(html).toContain("==UserScript==");
+      });
+    });
 
-    const result = await registeredHandler!(req, res);
-    expect(result).toBe(true);
-    expect(mockApi.logger.debug).toHaveBeenCalled();
-  });
+    describe("inject.js endpoint", () => {
+      it("should serve inject.js at /better-gateway/inject.js", async () => {
+        const req = createMockReq("/better-gateway/inject.js");
+        const result = await handler(req, mockRes as ServerResponse);
+        expect(result).toBe(true);
+        expect(mockRes.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
+          "Content-Type": "application/javascript",
+        }));
+      });
 
-  it("should match /better-gateway/ path", async () => {
-    const req = createMockRequest({ url: "/better-gateway/" });
-    const res = createMockResponse();
+      it("should include config in inject.js", async () => {
+        const req = createMockReq("/better-gateway/inject.js");
+        await handler(req, mockRes as ServerResponse);
+        const script = mockRes.end.mock.calls[0][0];
+        expect(script).toContain("__BETTER_GATEWAY_CONFIG__");
+        expect(script).toContain("reconnectIntervalMs");
+        expect(script).toContain("maxReconnectAttempts");
+      });
 
-    const result = await registeredHandler!(req, res);
-    expect(result).toBe(true);
-  });
+      it("should set no-cache header", async () => {
+        const req = createMockReq("/better-gateway/inject.js");
+        await handler(req, mockRes as ServerResponse);
+        expect(mockRes.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
+          "Cache-Control": "no-cache",
+        }));
+      });
 
-  it("should match /better-gateway/subpath", async () => {
-    const req = createMockRequest({ url: "/better-gateway/some/path" });
-    const res = createMockResponse();
+      it("should log debug message", async () => {
+        const req = createMockReq("/better-gateway/inject.js");
+        await handler(req, mockRes as ServerResponse);
+        expect(mockLogger.debug).toHaveBeenCalledWith("Served inject.js");
+      });
+    });
 
-    const result = await registeredHandler!(req, res);
-    expect(result).toBe(true);
-  });
+    describe("userscript endpoint", () => {
+      it("should serve userscript at /better-gateway/userscript.user.js", async () => {
+        const req = createMockReq("/better-gateway/userscript.user.js");
+        const result = await handler(req, mockRes as ServerResponse);
+        expect(result).toBe(true);
+        expect(mockRes.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
+          "Content-Type": "application/javascript",
+        }));
+      });
 
-  it("should match /better-gateway with query string", async () => {
-    const req = createMockRequest({ url: "/better-gateway?foo=bar" });
-    const res = createMockResponse();
+      it("should set content-disposition for download", async () => {
+        const req = createMockReq("/better-gateway/userscript.user.js");
+        await handler(req, mockRes as ServerResponse);
+        expect(mockRes.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
+          "Content-Disposition": "attachment; filename=better-gateway.user.js",
+        }));
+      });
 
-    const result = await registeredHandler!(req, res);
-    expect(result).toBe(true);
-  });
+      it("should include userscript header", async () => {
+        const req = createMockReq("/better-gateway/userscript.user.js");
+        await handler(req, mockRes as ServerResponse);
+        const script = mockRes.end.mock.calls[0][0];
+        expect(script).toContain("// ==UserScript==");
+        expect(script).toContain("// @name");
+        expect(script).toContain("// ==/UserScript==");
+      });
+    });
 
-  it("should not match /better-gateway-other", async () => {
-    const req = createMockRequest({ url: "/better-gateway-other" });
-    const res = createMockResponse();
-
-    const result = await registeredHandler!(req, res);
-    expect(result).toBe(true);
-  });
-
-  it("should not match paths with better-gateway in middle", async () => {
-    const req = createMockRequest({ url: "/api/better-gateway/test" });
-    const res = createMockResponse();
-
-    const result = await registeredHandler!(req, res);
-    expect(result).toBe(false);
+    describe("404 handling", () => {
+      it("should return 404 for unknown /better-gateway/* paths", async () => {
+        const req = createMockReq("/better-gateway/unknown");
+        const result = await handler(req, mockRes as ServerResponse);
+        expect(result).toBe(true);
+        expect(mockRes.writeHead).toHaveBeenCalledWith(404, expect.objectContaining({
+          "Content-Type": "text/plain",
+        }));
+        expect(mockRes.end).toHaveBeenCalledWith("Not found");
+      });
+    });
   });
 });

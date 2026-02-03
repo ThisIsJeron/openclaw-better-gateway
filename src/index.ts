@@ -1,4 +1,4 @@
-import { IncomingMessage, ServerResponse, request as httpRequest } from "node:http";
+import { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -7,8 +7,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 interface PluginConfig {
-  upstreamHost: string;
-  upstreamPort: number;
   reconnectIntervalMs: number;
   maxReconnectAttempts: number;
 }
@@ -28,8 +26,6 @@ interface PluginApi {
 }
 
 const DEFAULT_CONFIG: PluginConfig = {
-  upstreamHost: "localhost",
-  upstreamPort: 18789,
   reconnectIntervalMs: 3000,
   maxReconnectAttempts: 10,
 };
@@ -44,85 +40,119 @@ function loadInjectScript(): string {
   return injectScript;
 }
 
-function injectScriptIntoHtml(html: string, config: PluginConfig): string {
+function generateLandingPage(config: PluginConfig, gatewayHost: string): string {
   const script = loadInjectScript();
-  const configScript = `<script>
-window.__BETTER_GATEWAY_CONFIG__ = ${JSON.stringify({
-    reconnectIntervalMs: config.reconnectIntervalMs,
-    maxReconnectAttempts: config.maxReconnectAttempts,
-  })};
-</script>`;
-  const injection = `${configScript}<script>${script}</script>`;
+  const bookmarklet = `javascript:(function(){${encodeURIComponent(script.replace(/\n/g, " "))}})()`;
+  
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Better Gateway</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #1a1a2e;
+      color: #eee;
+    }
+    h1 { color: #00d4ff; }
+    h2 { color: #888; margin-top: 2em; }
+    code {
+      background: #2d2d44;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    pre {
+      background: #2d2d44;
+      padding: 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    .bookmarklet {
+      display: inline-block;
+      background: #00d4ff;
+      color: #1a1a2e;
+      padding: 12px 24px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: bold;
+      margin: 10px 0;
+    }
+    .bookmarklet:hover { background: #00b8e6; }
+    .status {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 0.85em;
+    }
+    .status.ok { background: #2d5a27; color: #7fff7f; }
+    .feature { margin: 8px 0; padding-left: 20px; }
+    .feature::before { content: "✓ "; color: #00d4ff; }
+  </style>
+</head>
+<body>
+  <h1>🔌 Better Gateway</h1>
+  <p>Auto-reconnect enhancement for OpenClaw Gateway UI</p>
+  
+  <h2>Features</h2>
+  <div class="feature">Automatic WebSocket reconnection on disconnect</div>
+  <div class="feature">Visual connection status indicator</div>
+  <div class="feature">Network online/offline detection</div>
+  <div class="feature">Configurable retry attempts (${config.maxReconnectAttempts} max)</div>
+  <div class="feature">Reconnect interval: ${config.reconnectIntervalMs}ms</div>
 
-  if (html.includes("</body>")) {
-    return html.replace("</body>", `${injection}</body>`);
-  }
-  if (html.includes("</html>")) {
-    return html.replace("</html>", `${injection}</html>`);
-  }
-  return html + injection;
+  <h2>Option 1: Bookmarklet</h2>
+  <p>Drag this to your bookmarks bar, then click it when on the Gateway UI:</p>
+  <p><a class="bookmarklet" href="${bookmarklet}">⚡ Better Gateway</a></p>
+  
+  <h2>Option 2: Console Injection</h2>
+  <p>Open DevTools (F12) on the Gateway UI and paste:</p>
+  <pre>fetch('/better-gateway/inject.js').then(r=>r.text()).then(eval)</pre>
+  
+  <h2>Option 3: Userscript (Tampermonkey)</h2>
+  <p>Create a new userscript with:</p>
+  <pre>// ==UserScript==
+// @name         Better Gateway
+// @match        ${gatewayHost}/*
+// @grant        none
+// ==/UserScript==
+
+fetch('/better-gateway/inject.js').then(r=>r.text()).then(eval);</pre>
+
+  <h2>Script URL</h2>
+  <p><code>/better-gateway/inject.js</code></p>
+  
+  <hr style="margin: 40px 0; border-color: #333;">
+  <p style="color: #666; font-size: 0.85em;">
+    <a href="https://github.com/ThisIsJeron/openclaw-better-gateway" style="color: #00d4ff;">GitHub</a> · 
+    Config: reconnect=${config.reconnectIntervalMs}ms, maxAttempts=${config.maxReconnectAttempts}
+  </p>
+</body>
+</html>`;
 }
 
-async function proxyRequest(
-  req: IncomingMessage,
-  res: ServerResponse,
-  config: PluginConfig,
-  targetPath: string
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const proxyReq = httpRequest(
-      {
-        hostname: config.upstreamHost,
-        port: config.upstreamPort,
-        path: targetPath,
-        method: req.method,
-        headers: {
-          ...req.headers,
-          host: `${config.upstreamHost}:${config.upstreamPort}`,
-        },
-      },
-      (proxyRes) => {
-        const contentType = proxyRes.headers["content-type"] || "";
-        const isHtml = contentType.includes("text/html");
+function generateUserscript(config: PluginConfig, gatewayUrl: string): string {
+  const script = loadInjectScript();
+  return `// ==UserScript==
+// @name         Better Gateway - Auto Reconnect
+// @namespace    https://github.com/ThisIsJeron/openclaw-better-gateway
+// @version      1.0.0
+// @description  Adds automatic WebSocket reconnection to OpenClaw Gateway UI
+// @match        ${gatewayUrl}/*
+// @grant        none
+// ==/UserScript==
 
-        if (isHtml) {
-          const chunks: Buffer[] = [];
-          proxyRes.on("data", (chunk) => chunks.push(chunk));
-          proxyRes.on("end", () => {
-            const body = Buffer.concat(chunks).toString("utf-8");
-            const modified = injectScriptIntoHtml(body, config);
+window.__BETTER_GATEWAY_CONFIG__ = ${JSON.stringify({
+  reconnectIntervalMs: config.reconnectIntervalMs,
+  maxReconnectAttempts: config.maxReconnectAttempts,
+})};
 
-            const headers = { ...proxyRes.headers };
-            delete headers["content-length"];
-            headers["content-length"] = String(Buffer.byteLength(modified));
-
-            res.writeHead(proxyRes.statusCode || 200, headers);
-            res.end(modified);
-            resolve();
-          });
-        } else {
-          const headers = { ...proxyRes.headers };
-          res.writeHead(proxyRes.statusCode || 200, headers);
-          proxyRes.pipe(res);
-          proxyRes.on("end", resolve);
-        }
-
-        proxyRes.on("error", reject);
-      }
-    );
-
-    proxyReq.on("error", (err) => {
-      res.writeHead(502, { "Content-Type": "text/plain" });
-      res.end(`Upstream connection failed: ${err.message}`);
-      resolve();
-    });
-
-    if (req.method !== "GET" && req.method !== "HEAD") {
-      req.pipe(proxyReq);
-    } else {
-      proxyReq.end();
-    }
-  });
+${script}`;
 }
 
 export default {
@@ -133,8 +163,6 @@ export default {
     parse(raw: unknown): PluginConfig {
       const config = (raw as Partial<PluginConfig>) || {};
       return {
-        upstreamHost: config.upstreamHost ?? DEFAULT_CONFIG.upstreamHost,
-        upstreamPort: config.upstreamPort ?? DEFAULT_CONFIG.upstreamPort,
         reconnectIntervalMs:
           config.reconnectIntervalMs ?? DEFAULT_CONFIG.reconnectIntervalMs,
         maxReconnectAttempts:
@@ -142,8 +170,6 @@ export default {
       };
     },
     uiHints: {
-      upstreamHost: { label: "Upstream Host", placeholder: "localhost" },
-      upstreamPort: { label: "Upstream Port", placeholder: "18789" },
       reconnectIntervalMs: {
         label: "Reconnect Interval (ms)",
         placeholder: "3000",
@@ -156,9 +182,9 @@ export default {
   },
 
   register(api: PluginApi): void {
-    const config = api.pluginConfig;
+    const config = { ...DEFAULT_CONFIG, ...(api.pluginConfig || {}) };
     api.logger.info(
-      `Better Gateway proxying to ${config.upstreamHost}:${config.upstreamPort}`
+      `Better Gateway loaded (reconnect: ${config.reconnectIntervalMs}ms, max: ${config.maxReconnectAttempts})`
     );
 
     api.registerHttpHandler(
@@ -170,14 +196,54 @@ export default {
           return false;
         }
 
-        let targetPath = pathname.replace(/^\/better-gateway/, "") || "/";
-        if (url.search) {
-          targetPath += url.search;
+        const gatewayHost = `http://${req.headers.host || "localhost:18789"}`;
+
+        // Serve the inject script
+        if (pathname === "/better-gateway/inject.js") {
+          const script = loadInjectScript();
+          const configuredScript = `window.__BETTER_GATEWAY_CONFIG__ = ${JSON.stringify({
+            reconnectIntervalMs: config.reconnectIntervalMs,
+            maxReconnectAttempts: config.maxReconnectAttempts,
+          })};\n${script}`;
+          
+          res.writeHead(200, {
+            "Content-Type": "application/javascript",
+            "Content-Length": Buffer.byteLength(configuredScript),
+            "Cache-Control": "no-cache",
+          });
+          res.end(configuredScript);
+          api.logger.debug("Served inject.js");
+          return true;
         }
 
-        api.logger.debug(`Proxying ${pathname} -> ${targetPath}`);
+        // Serve userscript download
+        if (pathname === "/better-gateway/userscript.user.js") {
+          const userscript = generateUserscript(config, gatewayHost);
+          res.writeHead(200, {
+            "Content-Type": "application/javascript",
+            "Content-Length": Buffer.byteLength(userscript),
+            "Content-Disposition": "attachment; filename=better-gateway.user.js",
+          });
+          res.end(userscript);
+          api.logger.debug("Served userscript");
+          return true;
+        }
 
-        await proxyRequest(req, res, config, targetPath);
+        // Landing page
+        if (pathname === "/better-gateway" || pathname === "/better-gateway/") {
+          const html = generateLandingPage(config, gatewayHost);
+          res.writeHead(200, {
+            "Content-Type": "text/html",
+            "Content-Length": Buffer.byteLength(html),
+          });
+          res.end(html);
+          api.logger.debug("Served landing page");
+          return true;
+        }
+
+        // 404 for other /better-gateway/* paths
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not found");
         return true;
       }
     );

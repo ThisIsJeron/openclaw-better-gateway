@@ -1,7 +1,7 @@
 {
-  "name": "openclaw-better-gateway",
+  "name": "@thisisjeron/openclaw-better-gateway",
   "version": "1.0.0",
-  "description": "OpenClaw plugin that enhances the gateway UI with auto-refresh and connection monitoring",
+  "description": "OpenClaw plugin that enhances the gateway UI with auto-reconnect and connection monitoring",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -9,13 +9,33 @@
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
   },
-  "dependencies": {
-    "better-sqlite3": "^11.0.0"
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "gateway",
+    "websocket",
+    "auto-reconnect"
+  ],
+  "author": "ThisIsJeron",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ThisIsJeron/openclaw-better-gateway.git"
   },
+  "bugs": {
+    "url": "https://github.com/ThisIsJeron/openclaw-better-gateway/issues"
+  },
+  "homepage": "https://github.com/ThisIsJeron/openclaw-better-gateway#readme",
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "dependencies": {},
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^20.14.0",
     "jsdom": "^26.0.0",
     "typescript": "^5.5.0",

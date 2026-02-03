@@ -11,10 +11,11 @@ An OpenClaw plugin that enhances the gateway web UI with automatic WebSocket rec
 
 ## Installation
 
-### From npm (coming soon)
 ```bash
 openclaw plugins install @thisisjeron/openclaw-better-gateway
 ```
+
+Then restart your gateway.
 
 ### From source
 ```bash
@@ -28,7 +29,7 @@ openclaw plugins install -l .
 
 After installation and gateway restart, access the enhanced UI at:
 ```
-https://your-gateway/better-gateway/
+https://<YOUR_GATEWAY>/better-gateway/
 ```
 
 ### Endpoints

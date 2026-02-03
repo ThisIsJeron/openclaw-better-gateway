@@ -1,0 +1,23 @@
+{
+  "name": "openclaw-better-gateway",
+  "version": "1.0.0",
+  "description": "OpenClaw plugin that enhances the gateway UI with auto-refresh and connection monitoring",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  },
+  "openclaw": {
+    "extensions": ["plugin"]
+  }
+}

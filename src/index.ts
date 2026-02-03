@@ -271,9 +271,16 @@ export default {
               proxyRes.on("end", () => {
                 let body = Buffer.concat(chunks).toString("utf-8");
 
-                // If it's HTML, inject our script before </head>
+                // If it's HTML, inject our script and fix relative URLs
                 if (contentType.includes("text/html")) {
                   const injectTag = `<script>${generateConfigScript(config)}\n${loadInjectScript()}</script>`;
+                  
+                  // Add <base href="/"> to make relative URLs resolve from root
+                  const baseTag = `<base href="/">`;
+                  
+                  if (body.includes("<head>")) {
+                    body = body.replace("<head>", `<head>${baseTag}`);
+                  }
 
                   if (body.includes("</head>")) {
                     body = body.replace("</head>", `${injectTag}</head>`);
@@ -282,10 +289,6 @@ export default {
                   } else {
                     body = body + injectTag;
                   }
-
-                  // Rewrite relative URLs to work from /better-gateway/
-                  // Assets like /assets/foo.js need to stay as /assets/foo.js
-                  // But hrefs to "/" should go to the original gateway
                 }
 
                 const headers: Record<string, string | number> = {

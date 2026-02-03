@@ -246,23 +246,26 @@ export default {
           return true;
         }
 
-        // Enhanced gateway UI - proxy the real gateway and inject our script
-        if (pathname === "/better-gateway" || pathname === "/better-gateway/") {
-          // Always proxy to localhost:18789 (internal gateway) - not the external host
-          const internalPort = 18789;
+        // Enhanced gateway UI - proxy ALL /better-gateway/* paths to internal gateway
+        // Strip /better-gateway prefix and proxy the rest
+        const internalPort = 18789;
+        let targetPath = pathname.replace(/^\/better-gateway/, "") || "/";
+        if (url.search) {
+          targetPath += url.search;
+        }
 
-          const proxyReq = httpRequest(
-            {
-              hostname: "127.0.0.1",
-              port: internalPort,
-              path: "/",
-              method: "GET",
-              family: 4, // Force IPv4
-              headers: {
-                "Accept": "text/html",
-                "Host": "127.0.0.1:18789",
-              },
+        const proxyReq = httpRequest(
+          {
+            hostname: "127.0.0.1",
+            port: internalPort,
+            path: targetPath,
+            method: req.method || "GET",
+            family: 4, // Force IPv4
+            headers: {
+              ...req.headers,
+              "Host": "127.0.0.1:18789",
             },
+          },
             (proxyRes) => {
               const contentType = proxyRes.headers["content-type"] || "";
               const chunks: Buffer[] = [];
@@ -309,13 +312,7 @@ export default {
             res.end("Failed to fetch gateway UI");
           });
 
-          proxyReq.end();
-          return true;
-        }
-
-        // 404 for other /better-gateway/* paths
-        res.writeHead(404, { "Content-Type": "text/plain" });
-        res.end("Not found");
+        proxyReq.end();
         return true;
       }
     );

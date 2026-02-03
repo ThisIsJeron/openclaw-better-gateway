@@ -10,6 +10,7 @@
   let statusIndicator = null;
   let originalWebSocket = window.WebSocket;
   let activeConnections = new Set();
+  let currentState = "connected";
 
   function createStatusIndicator() {
     if (statusIndicator) return statusIndicator;
@@ -19,7 +20,7 @@
     statusIndicator.style.cssText = `
       position: fixed;
       bottom: 12px;
-      right: 12px;
+      left: 12px;
       padding: 8px 14px;
       border-radius: 6px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -28,44 +29,74 @@
       z-index: 999999;
       transition: all 0.3s ease;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-      cursor: default;
+      cursor: pointer;
       user-select: none;
     `;
+
+    // Click handler - refresh on failed/disconnected, or force reconnect
+    statusIndicator.addEventListener("click", function () {
+      if (currentState === "failed" || currentState === "disconnected") {
+        window.location.reload();
+      } else if (currentState === "connected") {
+        // Show a brief "all good" feedback
+        const original = statusIndicator.innerHTML;
+        statusIndicator.innerHTML = `<span style="margin-right: 6px;">✓</span>All systems go!`;
+        setTimeout(function () {
+          statusIndicator.innerHTML = original;
+        }, 1500);
+      }
+    });
+
+    // Hover effect
+    statusIndicator.addEventListener("mouseenter", function () {
+      statusIndicator.style.transform = "scale(1.05)";
+      statusIndicator.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.25)";
+    });
+    statusIndicator.addEventListener("mouseleave", function () {
+      statusIndicator.style.transform = "scale(1)";
+      statusIndicator.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.15)";
+    });
 
     document.body.appendChild(statusIndicator);
     return statusIndicator;
   }
 
   function updateStatus(state, message) {
+    currentState = state;
     const indicator = createStatusIndicator();
 
     const styles = {
       connected: {
         background: "#10b981",
         color: "#ffffff",
-        icon: "\u25cf",
+        icon: "●",
       },
       disconnected: {
         background: "#ef4444",
         color: "#ffffff",
-        icon: "\u25cf",
+        icon: "●",
+        clickHint: " (click to refresh)",
       },
       reconnecting: {
         background: "#f59e0b",
         color: "#ffffff",
-        icon: "\u21bb",
+        icon: "↻",
       },
       failed: {
         background: "#6b7280",
         color: "#ffffff",
-        icon: "\u2717",
+        icon: "↻",
+        clickHint: " (click to refresh)",
       },
     };
 
     const style = styles[state] || styles.disconnected;
     indicator.style.background = style.background;
     indicator.style.color = style.color;
-    indicator.innerHTML = `<span style="margin-right: 6px;">${style.icon}</span>${message}`;
+    
+    const displayMessage = message + (style.clickHint || "");
+    indicator.innerHTML = `<span style="margin-right: 6px;">${style.icon}</span>${displayMessage}`;
+    indicator.title = state === "connected" ? "Click for status" : "Click to refresh page";
 
     if (state === "connected") {
       setTimeout(function () {
@@ -106,7 +137,7 @@
             }
           }, config.reconnectIntervalMs);
         } else if (reconnectAttempts >= config.maxReconnectAttempts) {
-          updateStatus("failed", "Connection failed - refresh to retry");
+          updateStatus("failed", "Connection failed");
         } else {
           updateStatus("disconnected", "Disconnected");
         }

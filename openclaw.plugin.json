@@ -1,5 +1,5 @@
 {
-  "id": "better-gateway",
+  "id": "openclaw-better-gateway",
   "name": "Better Gateway",
   "version": "1.0.0",
   "description": "Enhanced gateway UI with auto-refresh and WebSocket reconnection",

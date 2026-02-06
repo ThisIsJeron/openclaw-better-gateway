@@ -48,7 +48,7 @@ In your OpenClaw config (`openclaw.json`):
 {
   "plugins": {
     "entries": {
-      "better-gateway": {
+      "openclaw-better-gateway": {
         "enabled": true,
         "reconnectIntervalMs": 3000,
         "maxReconnectAttempts": 10

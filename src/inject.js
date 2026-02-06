@@ -33,18 +33,9 @@
       user-select: none;
     `;
 
-    // Click handler - refresh on failed/disconnected, or force reconnect
+    // Click handler - always refresh the page
     statusIndicator.addEventListener("click", function () {
-      if (currentState === "failed" || currentState === "disconnected") {
-        window.location.reload();
-      } else if (currentState === "connected") {
-        // Show a brief "all good" feedback
-        const original = statusIndicator.innerHTML;
-        statusIndicator.innerHTML = `<span style="margin-right: 6px;">✓</span>All systems go!`;
-        setTimeout(function () {
-          statusIndicator.innerHTML = original;
-        }, 1500);
-      }
+      window.location.reload();
     });
 
     // Hover effect
@@ -96,7 +87,7 @@
     
     const displayMessage = message + (style.clickHint || "");
     indicator.innerHTML = `<span style="margin-right: 6px;">${style.icon}</span>${displayMessage}`;
-    indicator.title = state === "connected" ? "Click for status" : "Click to refresh page";
+    indicator.title = "Click to refresh page";
 
     if (state === "connected") {
       setTimeout(function () {
